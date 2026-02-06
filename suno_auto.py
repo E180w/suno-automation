@@ -14,7 +14,7 @@ class SunoAuto:
         self.auth_token = os.getenv("SUNO_AUTH_TOKEN")
         self.browser_token = os.getenv("SUNO_BROWSER_TOKEN")
         self.device_id = os.getenv("SUNO_DEVICE_ID")
-        self.capsolver_key = os.getenv("CAPSOLVER_API_KEY")
+        self.anticaptcha_key = os.getenv("ANTICAPTCHA_API_KEY")
         self.base_url = "https://studio-api.prod.suno.com"
         
         if not self.auth_token:
@@ -31,23 +31,23 @@ class SunoAuto:
 
     def _solve_hcaptcha(self):
         """
-        Solves hCaptcha using Capsolver API.
+        Solves hCaptcha using Anti-Captcha API.
         Target Site: https://suno.com
         SiteKey: 512ed79c-939e-473d-9d48-690226c63b46
         """
-        if not self.capsolver_key:
-             raise SunoCaptchaRequired("CAPSOLVER_API_KEY is missing in environment variables.")
+        if not self.anticaptcha_key:
+             raise SunoCaptchaRequired("ANTICAPTCHA_API_KEY is missing in environment variables.")
         
         sitekey = "512ed79c-939e-473d-9d48-690226c63b46"
         target_url = "https://suno.com"
         
-        logger.info("Обнаружена капча, запуск решения через Capsolver...")
+        logger.info("Обнаружена капча, запуск решения через Anti-Captcha...")
         
-        create_task_url = "https://api.capsolver.com/createTask"
+        create_task_url = "https://api.anti-captcha.com/createTask"
         payload = {
-            "clientKey": self.capsolver_key,
+            "clientKey": self.anticaptcha_key,
             "task": {
-                "type": "HCaptchaTaskProxyLess",
+                "type": "HCaptchaTaskProxyless",
                 "websiteURL": target_url,
                 "websiteKey": sitekey
             }
@@ -61,26 +61,30 @@ class SunoAuto:
                 task_data = resp.json()
                 
                 if task_data.get("errorId", 0) != 0:
-                     raise Exception(f"Capsolver Error: {task_data.get('errorDescription')}")
+                     raise Exception(f"Anti-Captcha Error: {task_data.get('errorDescription')}")
                 
                 task_id = task_data.get("taskId")
+                logger.info(f"Задача Anti-Captcha создана. ID: {task_id}")
                 
                 # 2. Get Result
-                get_result_url = "https://api.capsolver.com/getTaskResult"
+                get_result_url = "https://api.anti-captcha.com/getTaskResult"
                 
-                for _ in range(60): # Poll for up to 120s
-                    time.sleep(2)
-                    status_resp = client.post(get_result_url, json={"clientKey": self.capsolver_key, "taskId": task_id})
+                for _ in range(60): # Poll for up to 300s
+                    time.sleep(5)
+                    status_resp = client.post(get_result_url, json={"clientKey": self.anticaptcha_key, "taskId": task_id})
                     status_data = status_resp.json()
                     
+                    if status_data.get("errorId", 0) != 0:
+                         raise Exception(f"Anti-Captcha Error: {status_data.get('errorDescription')}")
+                    
                     status = status_data.get("status")
+                    logger.info(f"Статус задачи Anti-Captcha: {status}")
+                    
                     if status == "ready":
+                        logger.success("Anti-Captcha успешно решила задачу")
                         return status_data.get("solution", {}).get("gRecaptchaResponse")
                     
-                    if status == "failed":
-                        raise Exception(f"Capsolver Failed: {status_data.get('errorDescription')}")
-                
-                raise TimeoutError("Capsolver timeout.")
+                raise TimeoutError("Anti-Captcha timeout.")
                 
         except Exception as e:
             logger.error(f"Error solving captcha: {e}")
@@ -163,7 +167,6 @@ class SunoAuto:
 
                 if not isinstance(clips, list):
                      if not clips:
-                         # logger.warning("No clips returned from feed, retrying...")
                          time.sleep(5)
                          continue
                      if isinstance(clips, dict) and 'detail' in clips:
@@ -173,11 +176,6 @@ class SunoAuto:
                 all_complete = True
                 for clip in clips:
                     status = clip.get('status')
-                    # clip_id = clip.get('id')
-                    # logger.info(f"Clip {clip_id}: {status}") 
-                    # Commented out verbose per-clip logging to keep console cleaner, 
-                    # or can uncomment if strict monitoring needed.
-                    
                     if status == 'error':
                         logger.error(f"Clip {clip.get('id')} failed generation.")
                         raise Exception(f"Clip {clip.get('id')} failed.")
